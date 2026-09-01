@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
-DEFAULT_MAX_TURNS = 500
+DEFAULT_MAX_TURNS = 250
 
 _BASE_CONFIG = SettingsConfigDict(
     case_sensitive=False,
@@ -43,7 +43,7 @@ class LlmSettings(BaseSettings):
         alias="LLM_EXTRA_HEADERS",
         repr=False,
     )
-    reasoning_effort: ReasoningEffort = Field(default="high", alias="STRIX_REASONING_EFFORT")
+    reasoning_effort: ReasoningEffort = Field(default="low", alias="STRIX_REASONING_EFFORT")
     force_required_tool_choice: bool = Field(
         default=False,
         alias="STRIX_FORCE_REQUIRED_TOOL_CHOICE",
@@ -59,7 +59,7 @@ class LlmSettings(BaseSettings):
     timeout: int = Field(default=300, alias="LLM_TIMEOUT")
     stream_idle_timeout: int = Field(default=300, ge=0, alias="LLM_STREAM_IDLE_TIMEOUT")
     max_tool_calls_per_turn: int = Field(
-        default=32,
+        default=16,
         ge=0,
         alias="LLM_MAX_TOOL_CALLS_PER_TURN",
     )
@@ -88,17 +88,43 @@ class ContextSettings(BaseSettings):
     model_config = _BASE_CONFIG
 
     auto_compact: bool = Field(default=True, alias="STRIX_CONTEXT_AUTO_COMPACT")
-    compact_buffer_tokens: int = Field(default=20_000, gt=0, alias="STRIX_CONTEXT_BUFFER_TOKENS")
-    keep_tokens: int = Field(default=8_000, gt=0, alias="STRIX_CONTEXT_KEEP_TOKENS")
+    # Larger buffer = compaction fires sooner (smaller live window), trading a few
+    # extra summary calls for a much smaller per-turn context. Aggressive default.
+    compact_buffer_tokens: int = Field(default=48_000, gt=0, alias="STRIX_CONTEXT_BUFFER_TOKENS")
+    keep_tokens: int = Field(default=6_000, gt=0, alias="STRIX_CONTEXT_KEEP_TOKENS")
     fallback_context_tokens: int = Field(
         default=200_000, gt=0, alias="STRIX_CONTEXT_FALLBACK_TOKENS"
     )
     summary_max_tokens: int = Field(default=4_096, gt=0, alias="STRIX_CONTEXT_SUMMARY_TOKENS")
-    tool_output_max_tokens: int = Field(default=8_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_TOKENS")
-    tool_output_max_lines: int = Field(default=2_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_LINES")
+    tool_output_max_tokens: int = Field(default=4_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_TOKENS")
+    tool_output_max_lines: int = Field(default=800, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_LINES")
     # Floor above the truncation-notice size so a preview always fits.
     tool_output_max_bytes: int = Field(
-        default=50 * 1024, ge=1024, alias="STRIX_TOOL_OUTPUT_MAX_BYTES"
+        default=24 * 1024, ge=1024, alias="STRIX_TOOL_OUTPUT_MAX_BYTES"
+    )
+
+
+class AgentGraphSettings(BaseSettings):
+    """Multi-agent fan-out limits — bound how many agents a scan can spawn.
+
+    Every spawned agent re-pays the full system prompt on each of its turns and
+    (by default) inherits a copy of its parent's history, so an unbounded fan-out
+    is the single largest driver of token spend on one target. These caps put a
+    deterministic ceiling on it. Set either to ``0`` to disable that limit and
+    restore the old unbounded behavior.
+    """
+
+    model_config = _BASE_CONFIG
+
+    # Max total agents in the graph (root included). 0 = unlimited.
+    max_agents: int = Field(default=4, ge=0, alias="STRIX_MAX_AGENTS")
+    # Max spawn depth. Root is depth 1; a child of root is depth 2. 0 = unlimited.
+    max_agent_depth: int = Field(default=2, ge=0, alias="STRIX_MAX_AGENT_DEPTH")
+    # Token cap on the parent history copied into a child spawned with
+    # inherit_context=True. The tail (most recent turns) is kept; older turns are
+    # dropped with a marker. 0 = copy the full parent history (old behavior).
+    inherit_context_max_tokens: int = Field(
+        default=6_000, ge=0, alias="STRIX_INHERIT_CONTEXT_MAX_TOKENS"
     )
 
 
@@ -111,7 +137,7 @@ class RuntimeSettings(BaseSettings):
     )
     backend: str = Field(default="docker", alias="STRIX_RUNTIME_BACKEND")
     # Max screenshot/image tool outputs kept live per agent context (0 = none).
-    max_context_images: int = Field(default=3, ge=0, alias="STRIX_MAX_CONTEXT_IMAGES")
+    max_context_images: int = Field(default=1, ge=0, alias="STRIX_MAX_CONTEXT_IMAGES")
 
 
 class TelemetrySettings(BaseSettings):
@@ -149,6 +175,7 @@ class Settings(BaseSettings):
 
     llm: LlmSettings = Field(default_factory=LlmSettings)
     dedupe: DedupeSettings = Field(default_factory=DedupeSettings)
+    agent_graph: AgentGraphSettings = Field(default_factory=AgentGraphSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
