@@ -18,6 +18,10 @@ Fast checks for obvious vulnerabilities. Best for:
 
 **Duration**: Minutes
 
+<Note>
+Quick mode is the default — it is the cheapest in token cost. Use `--scan-mode standard` or `--scan-mode deep` when you want more coverage.
+</Note>
+
 ## Standard
 
 ```bash
@@ -49,7 +53,7 @@ Thorough penetration testing. Best for:
 **White-box behavior**: Runs broad source-aware triage (`semgrep`, AST structural search, secrets, supply-chain checks) and then systematically validates top candidates dynamically.
 
 <Note>
-Deep mode is the default. It explores edge cases, chained vulnerabilities, and complex attack paths.
+Deep mode explores edge cases, chained vulnerabilities, and complex attack paths. It is the most thorough — and the most token-expensive — mode.
 </Note>
 
 ## Choosing a Mode

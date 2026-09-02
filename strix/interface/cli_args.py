@@ -182,13 +182,26 @@ Examples:
         "--scan-mode",
         type=str,
         choices=["quick", "standard", "deep"],
-        default="deep",
+        default="quick",
         help=(
             "Scan mode: "
-            "'quick' for fast CI/CD checks, "
+            "'quick' for fast CI/CD checks (default, cheapest), "
             "'standard' for routine testing, "
-            "'deep' for thorough security reviews (default). "
-            "Default: deep."
+            "'deep' for thorough security reviews. "
+            "Default: quick."
+        ),
+    )
+
+    parser.add_argument(
+        "--reasoning-effort",
+        dest="reasoning_effort",
+        type=str,
+        choices=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        default=None,
+        help=(
+            "Model reasoning effort for this run. Higher = more thinking tokens = "
+            "higher cost and (usually) deeper analysis. Overrides STRIX_REASONING_EFFORT "
+            "and the config file for this run. Default: the configured value (low)."
         ),
     )
 
@@ -305,6 +318,11 @@ Examples:
         os.environ["STRIX_MCP_ONLY"] = ",".join(args.mcp_server)
     if args.mcp_exclude:
         os.environ["STRIX_MCP_EXCLUDE"] = ",".join(args.mcp_exclude)
+
+    # Settings read STRIX_REASONING_EFFORT from the environment (env wins over the
+    # config file), so exporting it here makes the flag win for this run.
+    if args.reasoning_effort:
+        os.environ["STRIX_REASONING_EFFORT"] = args.reasoning_effort
 
     if args.update:
         sys.exit(0 if self_update() else 1)
@@ -454,5 +472,5 @@ def _load_resume_state(args: argparse.Namespace, parser: argparse.ArgumentParser
     if state.get("diff_scope"):
         args.diff_scope = state.get("diff_scope")
     persisted_scan_mode = state.get("scan_mode")
-    if persisted_scan_mode and args.scan_mode == "deep":
+    if persisted_scan_mode and args.scan_mode == "quick":
         args.scan_mode = persisted_scan_mode

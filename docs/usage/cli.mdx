@@ -44,8 +44,15 @@ strix (--target <target> | --target-list <path>) [options]
   [Workspace files](/usage/instructions#workspace-files).
 </ParamField>
 
-<ParamField path="--scan-mode, -m" type="string" default="deep">
-  Scan depth: `quick`, `standard`, or `deep`.
+<ParamField path="--scan-mode, -m" type="string" default="quick">
+  Scan depth: `quick` (default, cheapest), `standard`, or `deep`.
+</ParamField>
+
+<ParamField path="--reasoning-effort" type="string">
+  Model reasoning effort for this run: `none`, `minimal`, `low`, `medium`,
+  `high`, `xhigh`, or `max`. Higher = more thinking tokens = higher cost and
+  (usually) deeper analysis. Overrides `STRIX_REASONING_EFFORT` and the config
+  file for this run. Defaults to the configured value (`low`).
 </ParamField>
 
 <ParamField path="--scope-mode" type="string" default="auto">
@@ -104,7 +111,7 @@ strix (--target <target> | --target-list <path>) [options]
     counts.
 </ParamField>
 
-<ParamField path="--max-turns" type="integer" default="500">
+<ParamField path="--max-turns" type="integer" default="250">
   Maximum number of turns (one model response plus its tool round) allotted to
   **each** agent, applied per run. When an agent reaches this limit it is
   force-stopped.
