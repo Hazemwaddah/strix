@@ -58,6 +58,10 @@ any of them to `0` to disable that limit and restore the old unbounded behavior.
   Token cap on the parent history copied into a child spawned with `inherit_context=true`. The most-recent tail is kept; older turns are dropped with a marker. `0` = copy the full parent history.
 </ParamField>
 
+<ParamField path="STRIX_CAVEMAN" default="ultra" type="string">
+  Agent output-verbosity style, injected into **every** agent's system prompt (the root orchestrator and every sub-agent it spawns). Values: `off`, `lite`, `full`, `ultra`. When enabled, agents emit ultra-terse prose/reasoning to cut output tokens; payloads, code, commands, and vulnerability-report fields are always kept verbatim so finding accuracy is never traded for brevity. Set `off` to disable.
+</ParamField>
+
 <ParamField path="STRIX_MEMORY_COMPRESSOR_TIMEOUT" default="30" type="integer">
   Timeout in seconds for memory compression operations (context summarization).
 </ParamField>

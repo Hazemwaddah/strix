@@ -7,6 +7,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from strix.config import load_settings
 from strix.skills import get_available_skills, load_skills, skill_search_dirs
 from strix.utils.resource_paths import get_strix_resource_path
 
@@ -15,6 +16,51 @@ logger = logging.getLogger(__name__)
 
 
 _PROMPT_DIRNAME = "prompts"
+
+
+_CAVEMAN_INTENSITY = {
+    "lite": "Trim obvious filler and hedging. Keep sentences, but shorter.",
+    "full": (
+        "Drop articles (a/an/the), filler (just/really/basically/actually/simply), "
+        "pleasantries, and hedging. Sentence fragments are fine."
+    ),
+    "ultra": (
+        "Drop articles (a/an/the), filler (just/really/basically/actually/simply), "
+        "pleasantries, and hedging. Use terse fragments. Prefer short words "
+        "(big not extensive, fix not implement-a-solution-for). Maximum compression."
+    ),
+}
+
+
+def _caveman_block(mode: str) -> str:
+    """System-prompt block that makes an agent emit token-frugal 'caveman' prose.
+
+    Injected into every agent's system prompt (root and every spawned sub-agent),
+    so brevity is inherited across the whole graph. Compression is applied to
+    narration/reasoning ONLY; payloads, code, and report fields stay verbatim so
+    finding accuracy is never traded for token savings.
+    """
+    intensity = _CAVEMAN_INTENSITY.get(mode, _CAVEMAN_INTENSITY["ultra"])
+    return (
+        '\n\n<output_style name="caveman-' + mode + '">\n'
+        "TOKEN-FRUGAL OUTPUT MODE. This applies to you AND is inherited by every "
+        "sub-agent you spawn with create_agent.\n\n"
+        "Style for all prose, reasoning, notes, todos, and inter-agent messages:\n"
+        f"{intensity}\n\n"
+        "Keep ALL technical substance exact and complete. NEVER compress, "
+        "abbreviate, paraphrase, or drop any of the following — emit them verbatim "
+        "and in full:\n"
+        "- Tool-call arguments and any JSON you output.\n"
+        "- URLs, endpoints, parameters, payloads, headers, tokens, credentials, "
+        "hashes, file paths, and software versions.\n"
+        "- Code, shell commands, regexes, and exact error messages.\n"
+        "- Vulnerability report fields (create_vulnerability_report / "
+        "create_dependency_report): title, description, reproduction steps, "
+        "evidence, impact, and remediation stay full and precise.\n\n"
+        "Brevity applies to narration only, never to the security signal. When in "
+        "doubt, keep the detail.\n"
+        "</output_style>"
+    )
 
 
 def _resolve_skills(
@@ -111,6 +157,9 @@ def render_system_prompt(
             system_prompt_context=system_prompt_context or {},
             **skill_content,
         )
+        caveman_mode = load_settings().output_style.caveman
+        if caveman_mode != "off":
+            rendered = f"{rendered}{_caveman_block(caveman_mode)}"
     except Exception:
         logger.exception("render_system_prompt failed; returning empty prompt")
         return ""

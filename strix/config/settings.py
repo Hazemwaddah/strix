@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+CavemanMode = Literal["off", "lite", "full", "ultra"]
 
 DEFAULT_MAX_TURNS = 250
 
@@ -128,6 +129,19 @@ class AgentGraphSettings(BaseSettings):
     )
 
 
+class OutputStyleSettings(BaseSettings):
+    """Agent output-verbosity style, injected into every agent's system prompt.
+
+    "caveman" mode tells every agent (root and every spawned sub-agent) to emit
+    ultra-terse prose/reasoning to cut output tokens, while keeping all payloads,
+    code, and vulnerability-report fields exact. ``off`` disables it.
+    """
+
+    model_config = _BASE_CONFIG
+
+    caveman: CavemanMode = Field(default="ultra", alias="STRIX_CAVEMAN")
+
+
 class RuntimeSettings(BaseSettings):
     model_config = _BASE_CONFIG
 
@@ -176,6 +190,7 @@ class Settings(BaseSettings):
     llm: LlmSettings = Field(default_factory=LlmSettings)
     dedupe: DedupeSettings = Field(default_factory=DedupeSettings)
     agent_graph: AgentGraphSettings = Field(default_factory=AgentGraphSettings)
+    output_style: OutputStyleSettings = Field(default_factory=OutputStyleSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
