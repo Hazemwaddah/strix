@@ -84,6 +84,32 @@ def test_child_initial_input_trims_inherited_history(monkeypatch: pytest.MonkeyP
     assert "older inherited context dropped" in content
 
 
+def test_screenshot_does_not_evict_text_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A screenshot is replaced by a short placeholder before the child ever sees
+    # it, so budgeting against the raw base64 would drop useful text turns to
+    # make room for bytes that are never sent.
+    monkeypatch.setenv("STRIX_INHERIT_CONTEXT_MAX_TOKENS", "200")
+    loader._cached = None
+    try:
+        history = [
+            {"role": "assistant", "content": "earlier finding worth inheriting"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_image", "image_url": "data:image/png;base64," + "A" * 20_000}
+                ],
+            },
+        ]
+        result = child_initial_input(**_child_kwargs(history))
+    finally:
+        loader._cached = None
+
+    content = result[0]["content"]
+    assert "earlier finding worth inheriting" in content
+    assert "screenshot omitted from inherited context" in content
+    assert "older inherited context dropped" not in content
+
+
 def test_trim_truncates_oversized_newest_item(monkeypatch: pytest.MonkeyPatch) -> None:
     # One item, larger than the whole budget: keeping it whole would mean the cap
     # bounds nothing at all on the child's first request.

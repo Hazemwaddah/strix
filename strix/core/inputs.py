@@ -414,10 +414,13 @@ def child_initial_input(
     user messages.
     """
     parts: list[str] = []
-    parent_history = _trim_parent_history(parent_history)
+    # Scrub first, then measure: a screenshot's base64 block is replaced by a
+    # short placeholder, so budgeting against the raw block would let one image
+    # evict every useful text turn behind it for size the child never pays.
+    parent_history = _trim_parent_history(scrub_images_from_items(parent_history))
     if parent_history:
         rendered = json.dumps(
-            scrub_images_from_items(parent_history),
+            parent_history,
             ensure_ascii=False,
             default=str,
         )
