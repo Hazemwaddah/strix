@@ -26,33 +26,36 @@ _ACTIVE_STATUSES: frozenset[str] = frozenset({"running", "waiting"})
 logger = logging.getLogger(__name__)
 
 
-async def _fan_out_limit_error(coordinator: AgentCoordinator, parent_id: str) -> str | None:
-    """Return a model-facing error if spawning a child would breach a fan-out cap.
+def _agent_limit_error(max_agents: int) -> str:
+    """Model-facing refusal for a spawn that would breach ``STRIX_MAX_AGENTS``."""
+    return (
+        f"Agent limit reached ({max_agents} agents). Cannot spawn another. "
+        "Do this work yourself, reuse an existing agent via send_message_to_agent, "
+        "or wait_for_agents to let running ones finish. The operator can raise "
+        "STRIX_MAX_AGENTS if a larger fan-out is intended."
+    )
+
+
+async def _depth_limit_error(coordinator: AgentCoordinator, parent_id: str) -> str | None:
+    """Return a model-facing error if a child of ``parent_id`` would sit too deep.
 
     Bounds token spend: every extra agent re-pays the full system prompt on each
     of its turns, so an unbounded graph is the biggest single-target cost driver.
-    Both caps are configurable (``STRIX_MAX_AGENTS`` / ``STRIX_MAX_AGENT_DEPTH``);
-    ``0`` disables that check.
+    ``STRIX_MAX_AGENT_DEPTH`` caps the tree height; ``0`` disables the check. The
+    parent's own depth is fixed for the life of the agent, so unlike the total
+    agent cap this needs no reservation to stay correct under concurrent spawns.
     """
-    graph = load_settings().agent_graph
+    max_depth = load_settings().agent_graph.max_agent_depth
+    if not max_depth:
+        return None
 
-    if graph.max_agents and await coordinator.agent_count() >= graph.max_agents:
+    child_depth = await coordinator.depth_of(parent_id) + 1
+    if child_depth > max_depth:
         return (
-            f"Agent limit reached ({graph.max_agents} agents). Cannot spawn another. "
-            "Do this work yourself, reuse an existing agent via send_message_to_agent, "
-            "or wait_for_agents to let running ones finish. The operator can raise "
-            "STRIX_MAX_AGENTS if a larger fan-out is intended."
+            f"Agent depth limit reached (max {max_depth}). This agent is "
+            "too deep in the tree to spawn a child. Run the subtask yourself or hand it "
+            "back to a shallower agent. The operator can raise STRIX_MAX_AGENT_DEPTH."
         )
-
-    if graph.max_agent_depth:
-        child_depth = await coordinator.depth_of(parent_id) + 1
-        if child_depth > graph.max_agent_depth:
-            return (
-                f"Agent depth limit reached (max {graph.max_agent_depth}). This agent is "
-                "too deep in the tree to spawn a child. Run the subtask yourself or hand it "
-                "back to a shallower agent. The operator can raise STRIX_MAX_AGENT_DEPTH."
-            )
-
     return None
 
 
@@ -599,19 +602,24 @@ async def create_agent(
             default=str,
         )
 
-    limit_error = await _fan_out_limit_error(coordinator, parent_id)
-    if limit_error:
+    skill_list = list(skills or [])
+    spawn_error = validate_requested_skills(skill_list) or await _depth_limit_error(
+        coordinator, parent_id
+    )
+    if spawn_error:
         return json.dumps(
-            {"success": False, "error": limit_error, "agent_id": None},
+            {"success": False, "error": spawn_error, "agent_id": None},
             ensure_ascii=False,
             default=str,
         )
 
-    skill_list = list(skills or [])
-    skill_error = validate_requested_skills(skill_list)
-    if skill_error:
+    # Claim the slot before spawning, not just before checking: the child only
+    # enters the graph once the spawner registers it, and two parents racing for
+    # the last slot would otherwise both be waved through.
+    max_agents = load_settings().agent_graph.max_agents
+    if not await coordinator.try_reserve_agent_slot(max_agents):
         return json.dumps(
-            {"success": False, "error": skill_error, "agent_id": None},
+            {"success": False, "error": _agent_limit_error(max_agents), "agent_id": None},
             ensure_ascii=False,
             default=str,
         )
@@ -632,6 +640,11 @@ async def create_agent(
             ensure_ascii=False,
             default=str,
         )
+    finally:
+        # The spawner registers the child before it returns, so by now the slot
+        # is accounted for by the graph itself (and on failure there is nothing
+        # to account for).
+        await coordinator.release_agent_slot()
 
     logger.info(
         "create_agent: spawned %s (%s) parent=%s skills=%d task_len=%d",

@@ -32,6 +32,28 @@ _HISTORY_TRUNCATED_MARKER = {
     "role": "user",
     "content": "[... older inherited context dropped to bound token cost ...]",
 }
+_OVERSIZED_ITEM_NOTE = "[... newest inherited item truncated to bound token cost ...]\n"
+
+
+def _fit_oversized_item(item: Any, char_budget: int) -> dict[str, str]:
+    """Render ``item`` as a text message cut down to ``char_budget``.
+
+    Used only when the single newest item is larger than the whole budget:
+    keeping it whole would blow the cap on the child's very first request and
+    can overflow the provider's context window. Nothing else survives the trim
+    in that case, so rendering it as one text message cannot orphan a tool call
+    from its output.
+    """
+    body = json.dumps(item, ensure_ascii=False, default=str)
+    while body:
+        summary = {"role": "user", "content": f"{_OVERSIZED_ITEM_NOTE}{body}"}
+        overshoot = len(json.dumps(summary, ensure_ascii=False)) - char_budget
+        if overshoot <= 0:
+            return summary
+        body = body[: max(len(body) - overshoot, 0)]
+    # Budget too small to hold even a snippet; the marker alone is the most that
+    # can be said about the dropped item.
+    return dict(_HISTORY_TRUNCATED_MARKER)
 
 
 def _trim_parent_history(parent_history: list[Any]) -> list[Any]:
@@ -50,8 +72,13 @@ def _trim_parent_history(parent_history: list[Any]) -> list[Any]:
     used = 0
     for item in reversed(parent_history):
         size = len(json.dumps(item, ensure_ascii=False, default=str))
-        if used + size > char_budget and kept:
-            kept.append(_HISTORY_TRUNCATED_MARKER)
+        if used + size > char_budget:
+            # ``kept`` is empty only on the newest item, i.e. that one item is
+            # over budget all by itself. Truncate it rather than keeping it
+            # whole — otherwise the cap silently fails to bound anything.
+            kept.append(
+                _HISTORY_TRUNCATED_MARKER if kept else _fit_oversized_item(item, char_budget)
+            )
             break
         kept.append(item)
         used += size

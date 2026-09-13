@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from itertools import pairwise
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 
 from strix.config import loader
 from strix.core.inputs import (
+    _trim_parent_history,
     build_root_task,
     build_scan_targets,
     build_scope_context,
@@ -64,8 +66,8 @@ def test_child_initial_input_no_consecutive_same_role(parent_history: list[Any])
 
 
 def test_child_initial_input_trims_inherited_history(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Tiny cap so all but the most recent item is dropped.
-    monkeypatch.setenv("STRIX_INHERIT_CONTEXT_MAX_TOKENS", "1")
+    # Cap (20 tokens ~= 80 chars) fits the newest item but not both.
+    monkeypatch.setenv("STRIX_INHERIT_CONTEXT_MAX_TOKENS", "20")
     loader._cached = None
     try:
         history = [
@@ -80,6 +82,35 @@ def test_child_initial_input_trims_inherited_history(monkeypatch: pytest.MonkeyP
     assert "newest work item that should be kept" in content
     assert "oldest work item that should be dropped" not in content
     assert "older inherited context dropped" in content
+
+
+def test_trim_truncates_oversized_newest_item(monkeypatch: pytest.MonkeyPatch) -> None:
+    # One item, larger than the whole budget: keeping it whole would mean the cap
+    # bounds nothing at all on the child's first request.
+    monkeypatch.setenv("STRIX_INHERIT_CONTEXT_MAX_TOKENS", "40")
+    loader._cached = None
+    try:
+        history = [{"role": "assistant", "content": "x" * 5000}]
+        trimmed = _trim_parent_history(history)
+    finally:
+        loader._cached = None
+
+    assert len(trimmed) == 1
+    assert len(json.dumps(trimmed[0], ensure_ascii=False)) <= 40 * 4
+    assert "truncated to bound token cost" in trimmed[0]["content"]
+
+
+def test_trim_falls_back_to_marker_when_budget_tiny(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STRIX_INHERIT_CONTEXT_MAX_TOKENS", "1")
+    loader._cached = None
+    try:
+        history = [{"role": "assistant", "content": "x" * 5000}]
+        trimmed = _trim_parent_history(history)
+    finally:
+        loader._cached = None
+
+    assert len(trimmed) == 1
+    assert "x" * 100 not in trimmed[0]["content"]
 
 
 def test_child_initial_input_keeps_full_history_when_cap_disabled(
